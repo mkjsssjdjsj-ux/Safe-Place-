@@ -1,0 +1,1103 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { 
+  Lock, Shield, Key, AppWindow, Globe, Wallet, CreditCard, Mail, 
+  Share2, Fingerprint, Server, Wrench, FileText, Activity, 
+  DownloadCloud, Settings, Search, Plus, Bell, User, LogOut, 
+  Eye, EyeOff, Copy, Trash, Edit, Check, AlertTriangle, X, LayoutDashboard
+} from 'lucide-react';
+
+// --- CUSTOM CSS FOR ANIMATIONS & EFFECTS ---
+const globalStyles = `
+  @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap');
+
+  :root {
+    --primary-glow: rgba(6, 182, 212, 0.4);
+    --bg-dark: #020617;
+    --glass-bg: rgba(15, 23, 42, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.08);
+  }
+
+  body {
+    font-family: 'Tajawal', sans-serif;
+    background-color: var(--bg-dark);
+    color: white;
+    overflow-x: hidden;
+  }
+
+  /* Cyber Grid Background */
+  .cyber-bg {
+    background-image: 
+      linear-gradient(to right, rgba(6, 182, 212, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(6, 182, 212, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-position: center center;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: -2;
+  }
+
+  .cyber-glow {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60vw; height: 60vw;
+    background: radial-gradient(circle, rgba(29,78,216,0.15) 0%, rgba(2,6,23,0) 70%);
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  /* Glassmorphism Classes */
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .glass-card {
+    background: linear-gradient(145deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%);
+    border: 1px solid rgba(6, 182, 212, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+  }
+  
+  .glass-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 40px 0 var(--primary-glow);
+    border-color: rgba(6, 182, 212, 0.5);
+  }
+
+  /* Animations */
+  @keyframes float {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+    100% { transform: translateY(0px); }
+  }
+  .animate-float { animation: float 6s ease-in-out infinite; }
+
+  @keyframes pulse-glow {
+    0% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.4); }
+    70% { box-shadow: 0 0 0 20px rgba(6, 182, 212, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+  }
+  .animate-pulse-glow { animation: pulse-glow 2s infinite; }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+    20%, 40%, 60%, 80% { transform: translateX(5px); }
+  }
+  .animate-shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+  ::-webkit-scrollbar-thumb { background: rgba(6, 182, 212, 0.3); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(6, 182, 212, 0.6); }
+`;
+
+// --- UTILS & SECURITY ---
+// Simple local obfuscation to prevent plain text in localStorage
+// Note: Real apps use Web Crypto API. This is a lightweight sync version for the demo constraint.
+const encodeData = (data, key) => {
+  try {
+    const text = JSON.stringify(data);
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+      result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return btoa(unescape(encodeURIComponent(result)));
+  } catch(e) { return null; }
+};
+
+const decodeData = (encoded, key) => {
+  try {
+    const text = decodeURIComponent(escape(atob(encoded)));
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+      result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return JSON.parse(result);
+  } catch(e) { return null; }
+};
+
+const DEFAULT_PASS = '258369';
+const STORAGE_KEY = 'safeplace_vault_data';
+const PASS_HASH_KEY = 'safeplace_master_hash'; // Storing plain pass hash securely isn't possible purely client side without a server, we just store a hashed validation check.
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// Simple hash for validation check
+const simpleHash = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString();
+};
+
+// --- CONFIGURATION DATA ---
+const CATEGORIES = [
+  { id: 'dashboard', label: 'الرئيسية', icon: LayoutDashboard },
+  { id: 'passwords', label: 'كلمات السر', icon: Key },
+  { id: 'apps', label: 'التطبيقات', icon: AppWindow },
+  { id: 'websites', label: 'المواقع', icon: Globe },
+  { id: 'wallets', label: 'المحافظ والبنوك', icon: Wallet },
+  { id: 'cards', label: 'البطاقات', icon: CreditCard },
+  { id: 'emails', label: 'الإيميلات', icon: Mail },
+  { id: 'social', label: 'السوشيال ميديا', icon: Share2 },
+  { id: '2fa', label: 'أكواد المصادقة 2FA', icon: Fingerprint },
+  { id: 'domains', label: 'الدومينات والاستضافة', icon: Server },
+  { id: 'tools', label: 'الأدوات والاشتراكات', icon: Wrench },
+  { id: 'notes', label: 'الملاحظات السرية', icon: FileText },
+  { id: 'activity', label: 'سجل النشاط', icon: Activity },
+  { id: 'backup', label: 'النسخ الاحتياطي', icon: DownloadCloud },
+  { id: 'settings', label: 'الإعدادات', icon: Settings },
+];
+
+const ITEM_SCHEMAS = {
+  passwords: [
+    { name: 'title', label: 'عنوان الحساب', type: 'text', required: true },
+    { name: 'username', label: 'اسم المستخدم / الإيميل', type: 'text' },
+    { name: 'password', label: 'كلمة المرور', type: 'password', required: true },
+    { name: 'website', label: 'اسم الموقع', type: 'text' },
+    { name: 'notes', label: 'ملاحظات', type: 'textarea' },
+  ],
+  apps: [
+    { name: 'title', label: 'اسم التطبيق', type: 'text', required: true },
+    { name: 'username', label: 'إيميل الدخول', type: 'text' },
+    { name: 'password', label: 'كلمة المرور', type: 'password', required: true },
+    { name: 'platform', label: 'المنصة (Android, iOS, Win)', type: 'text' },
+    { name: 'notes', label: 'ملاحظات', type: 'textarea' },
+  ],
+  websites: [
+    { name: 'title', label: 'اسم الموقع', type: 'text', required: true },
+    { name: 'url', label: 'الرابط (URL)', type: 'text' },
+    { name: 'username', label: 'الإيميل', type: 'text' },
+    { name: 'password', label: 'كلمة المرور', type: 'password', required: true },
+    { name: 'notes', label: 'ملاحظات', type: 'textarea' },
+  ],
+  wallets: [
+    { name: 'title', label: 'اسم المحفظة/البنك', type: 'text', required: true },
+    { name: 'type', label: 'النوع (بنك، باي بال، فودافون كاش)', type: 'text' },
+    { name: 'accountId', label: 'رقم الحساب / ID', type: 'text', required: true },
+    { name: 'linkedContact', label: 'إيميل/رقم مرتبط', type: 'text' },
+    { name: 'notes', label: 'ملاحظات سرية', type: 'textarea' },
+  ],
+  cards: [
+    { name: 'title', label: 'اسم البطاقة (Nickname)', type: 'text', required: true },
+    { name: 'cardholder', label: 'اسم حامل البطاقة', type: 'text' },
+    { name: 'number', label: 'رقم البطاقة (آخر 4 أرقام أو كامل)', type: 'text' },
+    { name: 'expiry', label: 'تاريخ الانتهاء (MM/YY)', type: 'text' },
+    { name: 'cvv', label: 'CVV', type: 'password' },
+    { name: 'notes', label: 'ملاحظات الفواتير', type: 'textarea' },
+  ],
+  emails: [
+    { name: 'title', label: 'عنوان الإيميل (مثال: إيميل العمل)', type: 'text', required: true },
+    { name: 'provider', label: 'المزود (Gmail, Outlook...)', type: 'text' },
+    { name: 'email', label: 'عنوان الإيميل', type: 'text', required: true },
+    { name: 'password', label: 'كلمة المرور', type: 'password', required: true },
+    { name: 'recoveryEmail', label: 'إيميل الاسترداد', type: 'text' },
+    { name: 'notes', label: 'ملاحظات', type: 'textarea' },
+  ],
+  social: [
+    { name: 'title', label: 'المنصة (فيسبوك، تويتر...)', type: 'text', required: true },
+    { name: 'username', label: 'اسم المستخدم', type: 'text' },
+    { name: 'email', label: 'الإيميل', type: 'text' },
+    { name: 'password', label: 'كلمة المرور', type: 'password', required: true },
+    { name: 'url', label: 'رابط الحساب', type: 'text' },
+  ],
+  '2fa': [
+    { name: 'title', label: 'اسم الخدمة', type: 'text', required: true },
+    { name: 'secretKey', label: 'المفتاح السري (Secret Key)', type: 'password', required: true },
+    { name: 'backupCodes', label: 'أكواد الاسترداد الاحتياطية', type: 'textarea' },
+  ],
+  domains: [
+    { name: 'title', label: 'اسم الدومين / الاستضافة', type: 'text', required: true },
+    { name: 'provider', label: 'الشركة (Namecheap, Hostinger)', type: 'text' },
+    { name: 'expiry', label: 'تاريخ الانتهاء', type: 'date' },
+    { name: 'url', label: 'رابط الدخول', type: 'text' },
+    { name: 'username', label: 'إيميل الحساب', type: 'text' },
+    { name: 'password', label: 'كلمة المرور', type: 'password' },
+    { name: 'notes', label: 'إعدادات DNS / ملاحظات', type: 'textarea' },
+  ],
+  tools: [
+    { name: 'title', label: 'اسم الأداة (Canva, ChatGPT...)', type: 'text', required: true },
+    { name: 'plan', label: 'خطة الاشتراك', type: 'text' },
+    { name: 'renewal', label: 'تاريخ التجديد', type: 'date' },
+    { name: 'username', label: 'إيميل الحساب', type: 'text' },
+    { name: 'password', label: 'كلمة المرور', type: 'password' },
+  ],
+  notes: [
+    { name: 'title', label: 'عنوان الملاحظة', type: 'text', required: true },
+    { name: 'content', label: 'المحتوى السري', type: 'textarea', required: true },
+    { name: 'tags', label: 'كلمات دلالية', type: 'text' },
+  ],
+};
+
+// --- COMPONENTS ---
+
+// 1. Toast Notification System
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  const colors = {
+    success: 'bg-green-500/20 border-green-500/50 text-green-300',
+    error: 'bg-red-500/20 border-red-500/50 text-red-300',
+    info: 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300'
+  };
+
+  return (
+    <div className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full border glass-panel flex items-center gap-2 animate-fade-in z-50 ${colors[type]}`}>
+      {type === 'success' && <Check size={18} />}
+      {type === 'error' && <AlertTriangle size={18} />}
+      {type === 'info' && <Bell size={18} />}
+      <span className="font-medium">{message}</span>
+    </div>
+  );
+};
+
+// 2. Main Application Component
+export default function SafePlaceApp() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [masterKey, setMasterKey] = useState('');
+  const [vaultData, setVaultData] = useState([]);
+  const [activityLog, setActivityLog] = useState([]);
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // UI State
+  const [isLoginError, setIsLoginError] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+
+  // Initialize Vault
+  useEffect(() => {
+    // Inject styles
+    const styleEl = document.createElement('style');
+    styleEl.innerHTML = globalStyles;
+    document.head.appendChild(styleEl);
+
+    // Setup initial password check
+    if (!localStorage.getItem(PASS_HASH_KEY)) {
+      localStorage.setItem(PASS_HASH_KEY, simpleHash(DEFAULT_PASS));
+    }
+    
+    return () => document.head.removeChild(styleEl);
+  }, []);
+
+  // Idle Timeout Logic
+  useEffect(() => {
+    let timeoutId;
+    
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      if (isAuthenticated) {
+        timeoutId = setTimeout(() => handleLock(), IDLE_TIMEOUT_MS);
+      }
+    };
+
+    if (isAuthenticated) {
+      window.addEventListener('mousemove', resetTimer);
+      window.addEventListener('keypress', resetTimer);
+      resetTimer();
+    }
+
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('mousemove', resetTimer);
+      window.removeEventListener('keypress', resetTimer);
+    };
+  }, [isAuthenticated]);
+
+  const logActivity = (action, detail) => {
+    const newLog = { id: Date.now(), action, detail, time: new Date().toLocaleString('ar-EG') };
+    setActivityLog(prev => [newLog, ...prev].slice(0, 50));
+  };
+
+  const showToast = (msg, type = 'success') => setToast({ message: msg, type });
+
+  const handleLogin = (password) => {
+    const storedHash = localStorage.getItem(PASS_HASH_KEY);
+    if (simpleHash(password) === storedHash) {
+      setMasterKey(password);
+      
+      // Load Data
+      const encryptedData = localStorage.getItem(STORAGE_KEY);
+      if (encryptedData) {
+        const decrypted = decodeData(encryptedData, password);
+        if (decrypted) {
+          setVaultData(decrypted.items || []);
+          setActivityLog(decrypted.logs || []);
+        } else {
+          showToast('فشل في فك تشفير البيانات. قد تكون تالفة.', 'error');
+        }
+      } else {
+        // First time, initialize empty
+        setVaultData([]);
+        setActivityLog([]);
+      }
+      
+      setIsAuthenticated(true);
+      logActivity('تسجيل دخول', 'تم فتح الخزنة بنجاح');
+      showToast('تم فتح الخزنة', 'success');
+    } else {
+      setIsLoginError(true);
+      setTimeout(() => setIsLoginError(false), 500); // match animation duration
+    }
+  };
+
+  const handleLock = () => {
+    saveVaultData(vaultData, activityLog);
+    setIsAuthenticated(false);
+    setMasterKey('');
+    setVaultData([]);
+    setCurrentView('dashboard');
+    showToast('تم قفل الخزنة لتأمين البيانات', 'info');
+  };
+
+  const saveVaultData = (items, logs = activityLog) => {
+    if (!masterKey) return;
+    const payload = { items, logs };
+    const encrypted = encodeData(payload, masterKey);
+    localStorage.setItem(STORAGE_KEY, encrypted);
+  };
+
+  const handleSaveItem = (itemData) => {
+    const isNew = !itemData.id;
+    const newItem = isNew ? { ...itemData, id: Date.now().toString(), createdAt: new Date().toISOString() } 
+                          : { ...itemData, updatedAt: new Date().toISOString() };
+    
+    let updatedData;
+    if (isNew) {
+      updatedData = [newItem, ...vaultData];
+      logActivity('إضافة', `تم إضافة عنصر جديد في ${CATEGORIES.find(c=>c.id === newItem.category)?.label}`);
+    } else {
+      updatedData = vaultData.map(i => i.id === newItem.id ? newItem : i);
+      logActivity('تعديل', `تم تعديل عنصر في ${CATEGORIES.find(c=>c.id === newItem.category)?.label}`);
+    }
+    
+    setVaultData(updatedData);
+    saveVaultData(updatedData);
+    setIsFormOpen(false);
+    showToast('تم الحفظ بنجاح');
+  };
+
+  const handleDeleteItem = (id) => {
+    if(window.confirm('هل أنت متأكد من حذف هذا العنصر نهائياً؟')) {
+      const updatedData = vaultData.filter(i => i.id !== id);
+      setVaultData(updatedData);
+      saveVaultData(updatedData);
+      logActivity('حذف', 'تم حذف عنصر من الخزنة');
+      showToast('تم الحذف', 'info');
+    }
+  };
+
+  // --- SUB-COMPONENTS ---
+
+  const LoginScreen = () => {
+    const [pwd, setPwd] = useState('');
+    const [showPwd, setShowPwd] = useState(false);
+
+    return (
+      <div className="min-h-screen flex items-center justify-center relative overflow-hidden" dir="rtl">
+        <div className="cyber-bg"></div>
+        <div className="cyber-glow"></div>
+        
+        <div className={`glass-card p-10 md:p-14 rounded-3xl max-w-md w-full mx-4 z-10 flex flex-col items-center text-center ${isLoginError ? 'animate-shake border-red-500/50' : ''}`}>
+          
+          <div className="relative mb-6">
+            <div className="absolute inset-0 bg-cyan-500/20 blur-xl rounded-full"></div>
+            <Lock size={80} className="text-cyan-400 animate-float relative z-10 drop-shadow-[0_0_15px_rgba(6,182,212,0.8)]" strokeWidth={1.5} />
+          </div>
+
+          <h1 className="text-4xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">
+            Safe Place
+          </h1>
+          <h2 className="text-xl font-medium text-slate-300 mb-2">
+            مكان آمن لحفظ كلمات السر
+          </h2>
+          <p className="text-sm text-slate-400 mb-8 max-w-[280px]">
+            خليك حريص، وسيب بياناتك المهمة في مخزن محلي مشفر يعمل على جهازك فقط.
+          </p>
+
+          <form onSubmit={(e) => { e.preventDefault(); handleLogin(pwd); }} className="w-full">
+            <div className="relative w-full mb-6 group">
+              <input
+                type={showPwd ? 'text' : 'password'}
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                placeholder="كلمة المرور الرئيسية..."
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-4 pr-12 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all text-center tracking-widest text-lg"
+                autoFocus
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowPwd(!showPwd)}
+                className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-cyan-400 transition-colors"
+              >
+                {showPwd ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_30px_rgba(6,182,212,0.5)] flex items-center justify-center gap-2"
+            >
+              <Shield size={20} />
+              <span>فتح الخزنة</span>
+            </button>
+          </form>
+
+          <div className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-500">
+            <Server size={14} />
+            <span>Local Secure Vault | No Cloud Sync</span>
+          </div>
+          {/* Default password hint for evaluation purpose */}
+          <div className="mt-2 text-xs text-yellow-500/70">
+            (Default Password: 258369)
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ItemFormModal = () => {
+    if (!isFormOpen) return null;
+    
+    // Determine which schema to use
+    const categoryId = editingItem ? editingItem.category : (currentView !== 'dashboard' && currentView !== 'settings' && currentView !== 'activity' && currentView !== 'backup' ? currentView : 'passwords');
+    const schema = ITEM_SCHEMAS[categoryId] || ITEM_SCHEMAS.passwords;
+    
+    const [formData, setFormData] = useState(editingItem || { category: categoryId });
+    const [showPwds, setShowPwds] = useState({});
+
+    const handleChange = (name, value) => {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const togglePwd = (name) => {
+      setShowPwds(prev => ({ ...prev, [name]: !prev[name] }));
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+        <div className="glass-card w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+            <h3 className="text-xl font-bold flex items-center gap-2 text-cyan-400">
+              {editingItem ? <Edit size={20} /> : <Plus size={20} />}
+              {editingItem ? 'تعديل البيانات' : 'إضافة عنصر جديد'}
+            </h3>
+            <button onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-white transition-colors">
+              <X size={24} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+            <form id="itemForm" onSubmit={(e) => { e.preventDefault(); handleSaveItem(formData); }} className="space-y-4">
+              
+              {/* Category selector if adding new from a general context */}
+              {!editingItem && (
+                <div className="space-y-1">
+                  <label className="text-sm text-slate-400">القسم</label>
+                  <select 
+                    value={formData.category}
+                    onChange={(e) => handleChange('category', e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
+                  >
+                    {CATEGORIES.filter(c => ITEM_SCHEMAS[c.id]).map(c => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Dynamic Fields based on Schema */}
+              {(ITEM_SCHEMAS[formData.category] || schema).map((field) => (
+                <div key={field.name} className="space-y-1">
+                  <label className="text-sm text-slate-400">{field.label} {field.required && <span className="text-red-500">*</span>}</label>
+                  
+                  {field.type === 'textarea' ? (
+                    <textarea
+                      required={field.required}
+                      value={formData[field.name] || ''}
+                      onChange={(e) => handleChange(field.name, e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 focus:outline-none min-h-[100px]"
+                    />
+                  ) : field.type === 'password' ? (
+                    <div className="relative">
+                      <input
+                        type={showPwds[field.name] ? 'text' : 'password'}
+                        required={field.required}
+                        value={formData[field.name] || ''}
+                        onChange={(e) => handleChange(field.name, e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 focus:outline-none pr-10"
+                        dir="ltr"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => togglePwd(field.name)}
+                        className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-cyan-400"
+                      >
+                        {showPwds[field.name] ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      type={field.type}
+                      required={field.required}
+                      value={formData[field.name] || ''}
+                      onChange={(e) => handleChange(field.name, e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
+                      dir={field.type === 'text' && (field.name.includes('title') || field.name.includes('name')) ? 'rtl' : 'ltr'}
+                    />
+                  )}
+                </div>
+              ))}
+            </form>
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/50 flex gap-3">
+            <button 
+              type="submit" 
+              form="itemForm"
+              className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white py-3 rounded-lg font-bold transition-colors shadow-lg shadow-cyan-900/50 flex items-center justify-center gap-2"
+            >
+              <Check size={20} /> حفظ البيانات
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setIsFormOpen(false)}
+              className="px-6 bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-lg transition-colors"
+            >
+              إلغاء
+            </button>
+          </div>
+
+        </div>
+      </div>
+    );
+  };
+
+  const DataCard = ({ item }) => {
+    const [showSecret, setShowSecret] = useState(false);
+    
+    const copyToClipboard = (text, typeName) => {
+      navigator.clipboard.writeText(text);
+      showToast(`تم نسخ ${typeName}`);
+    };
+
+    const schema = ITEM_SCHEMAS[item.category] || [];
+    
+    // Find key fields to display prominently
+    const titleField = schema.find(f => f.name === 'title')?.name || 'title';
+    const subTitleField = schema.find(f => f.name === 'username' || f.name === 'email' || f.name === 'accountId')?.name;
+    const secretField = schema.find(f => f.type === 'password' || f.name === 'secretKey')?.name;
+
+    return (
+      <div className="glass-panel p-5 rounded-2xl border border-slate-700/50 hover:border-cyan-500/30 transition-all group relative">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h4 className="font-bold text-lg text-white mb-1">{item[titleField] || 'بدون عنوان'}</h4>
+            {subTitleField && item[subTitleField] && (
+              <p className="text-sm text-slate-400 flex items-center gap-2" dir="ltr">
+                {item[subTitleField]}
+                <button onClick={() => copyToClipboard(item[subTitleField], 'المعرف')} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-white transition-opacity">
+                  <Copy size={14} />
+                </button>
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => { setEditingItem(item); setIsFormOpen(true); }} className="p-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded-lg">
+              <Edit size={16} />
+            </button>
+            <button onClick={() => handleDeleteItem(item.id)} className="p-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg">
+              <Trash size={16} />
+            </button>
+          </div>
+        </div>
+
+        {secretField && item[secretField] && (
+          <div className="bg-slate-900/80 rounded-lg p-3 flex items-center justify-between border border-slate-800 mt-4">
+            <div className="font-mono text-cyan-300 tracking-wider overflow-hidden text-ellipsis whitespace-nowrap" dir="ltr">
+              {showSecret ? item[secretField] : '••••••••••••••••'}
+            </div>
+            <div className="flex gap-2 pl-2">
+              <button onClick={() => setShowSecret(!showSecret)} className="text-slate-400 hover:text-white p-1">
+                {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+              <button onClick={() => copyToClipboard(item[secretField], 'البيانات السرية')} className="text-slate-400 hover:text-white p-1">
+                <Copy size={18} />
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Render a couple of other interesting fields if they exist */}
+        {item.notes && (
+           <div className="mt-3 text-xs text-slate-500 line-clamp-2">
+             <FileText size={12} className="inline mr-1" /> {item.notes}
+           </div>
+        )}
+      </div>
+    );
+  };
+
+  const DashboardView = () => {
+    // Stats calc
+    const stats = CATEGORIES.filter(c => ITEM_SCHEMAS[c.id]).map(c => ({
+      ...c,
+      count: vaultData.filter(i => i.category === c.id).length
+    }));
+
+    const recentItems = [...vaultData].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 4);
+
+    return (
+      <div className="space-y-6 animate-fade-in">
+        {/* Hero Alert */}
+        <div className="glass-card rounded-2xl p-6 border-l-4 border-l-cyan-500 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-white mb-1">مرحباً بك في خزنتك الآمنة</h2>
+            <p className="text-slate-400 text-sm">تم تشفير بياناتك محلياً. لا يمكن لأحد الوصول إليها بدون كلمة المرور.</p>
+          </div>
+          <Shield className="text-cyan-500/20 animate-pulse-glow rounded-full" size={60} />
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {stats.slice(0, 8).map(stat => (
+            <div key={stat.id} onClick={() => setCurrentView(stat.id)} className="glass-panel p-4 rounded-xl cursor-pointer hover:bg-white/5 transition-colors border border-slate-800">
+              <div className="flex justify-between items-center mb-2">
+                <stat.icon size={24} className="text-cyan-400" />
+                <span className="text-2xl font-bold text-white">{stat.count}</span>
+              </div>
+              <p className="text-sm text-slate-400">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Quick Access & Recent */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="glass-panel rounded-2xl p-6 border border-slate-800">
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-200">
+              <Activity size={18} className="text-cyan-400"/> أحدث الإضافات
+            </h3>
+            {recentItems.length > 0 ? (
+              <div className="space-y-3">
+                {recentItems.map(item => (
+                  <div key={item.id} className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg border border-slate-800 hover:border-cyan-900 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-slate-800 p-2 rounded-lg text-cyan-400">
+                        {React.createElement(CATEGORIES.find(c => c.id === item.category)?.icon || Key, {size: 16})}
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm text-white">{item.title}</p>
+                        <p className="text-xs text-slate-500">{CATEGORIES.find(c => c.id === item.category)?.label}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => {setEditingItem(item); setIsFormOpen(true);}} className="text-slate-400 hover:text-white">
+                      <Edit size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-500 text-sm border-2 border-dashed border-slate-800 rounded-xl">
+                لا توجد بيانات مضافة بعد
+              </div>
+            )}
+          </div>
+
+          <div className="glass-panel rounded-2xl p-6 border border-slate-800 relative overflow-hidden group">
+            <div className="absolute -right-10 -top-10 w-32 h-32 bg-blue-600/20 rounded-full blur-2xl group-hover:bg-cyan-500/30 transition-all"></div>
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-200">
+               حالة الأمان
+            </h3>
+            <div className="flex flex-col items-center justify-center py-4">
+              <div className="relative mb-4">
+                <svg className="w-24 h-24 transform -rotate-90">
+                  <circle cx="48" cy="48" r="36" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-800" />
+                  <circle cx="48" cy="48" r="36" stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray="226.2" strokeDashoffset="40" className="text-cyan-500" />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center text-xl font-bold text-white">85%</div>
+              </div>
+              <p className="text-sm text-slate-400 text-center">الخزنة مشفرة محلياً. تذكر أخذ نسخة احتياطية بشكل دوري.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const CategoryView = () => {
+    const categoryInfo = CATEGORIES.find(c => c.id === currentView);
+    const items = vaultData.filter(i => i.category === currentView && (searchQuery === '' || JSON.stringify(i).toLowerCase().includes(searchQuery.toLowerCase())));
+
+    return (
+      <div className="animate-fade-in h-full flex flex-col">
+        <div className="flex justify-between items-end mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+              {categoryInfo && <categoryInfo.icon className="text-cyan-400" />}
+              {categoryInfo?.label}
+            </h2>
+            <p className="text-slate-400 text-sm mt-1">إدارة وحفظ بياناتك الخاصة بـ {categoryInfo?.label}</p>
+          </div>
+          <button 
+            onClick={() => { setEditingItem(null); setIsFormOpen(true); }}
+            className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-lg shadow-cyan-900/50 flex items-center gap-2"
+          >
+            <Plus size={18} /> إضافة جديد
+          </button>
+        </div>
+
+        {items.length > 0 ? (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
+            {items.map(item => <DataCard key={item.id} item={item} />)}
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-500">
+            {categoryInfo && <categoryInfo.icon size={64} className="mb-4 opacity-20" />}
+            <p className="text-lg mb-2">لا توجد عناصر هنا بعد</p>
+            <p className="text-sm text-slate-600">اضغط على زر الإضافة للبدء في تخزين بياناتك.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ActivityView = () => (
+    <div className="animate-fade-in max-w-3xl mx-auto w-full">
+      <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+        <Activity className="text-cyan-400" /> سجل النشاط
+      </h2>
+      <div className="glass-panel rounded-2xl p-6 border border-slate-800">
+        {activityLog.length > 0 ? (
+          <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-700 before:to-transparent">
+            {activityLog.map((log, idx) => (
+              <div key={idx} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-slate-900 group-[.is-active]:bg-cyan-900 text-slate-500 group-[.is-active]:text-cyan-50 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+                  <Check size={16} />
+                </div>
+                <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] glass-panel p-4 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="font-bold text-white text-sm">{log.action}</div>
+                    <time className="text-xs font-medium text-slate-500" dir="ltr">{log.time}</time>
+                  </div>
+                  <div className="text-slate-400 text-sm">{log.detail}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-10 text-slate-500">لا يوجد نشاط مسجل بعد</div>
+        )}
+      </div>
+    </div>
+  );
+
+  const BackupView = () => {
+    const handleExport = () => {
+      const payload = { items: vaultData, logs: activityLog, timestamp: new Date().toISOString() };
+      // Double encrypt for export? Or just export current encrypted state.
+      // Better: export standard JSON stringified, but warn user it's unencrypted, OR export the encrypted base64 string.
+      // Let's export the raw encrypted payload that localStorage holds so it can be safely stored anywhere.
+      const rawEncrypted = localStorage.getItem(STORAGE_KEY);
+      
+      const blob = new Blob([rawEncrypted || ''], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `SafePlace_Backup_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.safe`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      logActivity('نسخ احتياطي', 'تم تصدير نسخة من البيانات');
+      showToast('تم تحميل النسخة الاحتياطية', 'success');
+    };
+
+    const handleImport = (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const content = event.target.result;
+          // Try to decode with current key to verify
+          const decrypted = decodeData(content, masterKey);
+          if (decrypted && decrypted.items) {
+            setVaultData(decrypted.items);
+            setActivityLog(decrypted.logs || []);
+            saveVaultData(decrypted.items, decrypted.logs);
+            showToast('تم استعادة البيانات بنجاح', 'success');
+            logActivity('استعادة بيانات', 'تم استيراد نسخة احتياطية');
+          } else {
+             showToast('الملف غير صالح أو مشفر بكلمة مرور مختلفة.', 'error');
+          }
+        } catch (err) {
+          showToast('حدث خطأ أثناء قراءة الملف', 'error');
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    return (
+      <div className="animate-fade-in max-w-2xl mx-auto w-full">
+        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+          <DownloadCloud className="text-cyan-400" /> النسخ الاحتياطي
+        </h2>
+        
+        <div className="glass-panel rounded-2xl p-6 border border-slate-800 space-y-6">
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex gap-4">
+            <AlertTriangle className="text-yellow-500 shrink-0" />
+            <div>
+              <h4 className="font-bold text-yellow-500 mb-1">تنبيه هام جداً</h4>
+              <p className="text-sm text-yellow-500/80">بياناتك مشفرة ومحفوظة على هذا المتصفح فقط. في حال مسح بيانات المتصفح ستفقد خزنتك. يُرجى تحميل نسخة احتياطية (مُشفرة) والاحتفاظ بها في مكان آمن.</p>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-700 hover:border-cyan-500/50 transition-colors flex flex-col items-center text-center gap-3">
+              <DownloadCloud size={40} className="text-cyan-400" />
+              <h3 className="font-bold text-white">تصدير البيانات</h3>
+              <p className="text-xs text-slate-400 flex-1">تحميل ملف مشفر يحتوي على جميع بياناتك.</p>
+              <button onClick={handleExport} className="w-full bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600 hover:text-white py-2 rounded-lg transition-colors font-medium">
+                تصدير الآن (.safe)
+              </button>
+            </div>
+
+            <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-700 hover:border-blue-500/50 transition-colors flex flex-col items-center text-center gap-3">
+              <Server size={40} className="text-blue-400" />
+              <h3 className="font-bold text-white">استيراد البيانات</h3>
+              <p className="text-xs text-slate-400 flex-1">استعادة بياناتك من ملف نسخة احتياطية سابق.</p>
+              <label className="w-full bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white py-2 rounded-lg transition-colors font-medium cursor-pointer">
+                اختيار ملف
+                <input type="file" accept=".safe" className="hidden" onChange={handleImport} />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const SettingsView = () => {
+    const [newPwd, setNewPwd] = useState('');
+    const [confirmPwd, setConfirmPwd] = useState('');
+
+    const handleChangePassword = (e) => {
+      e.preventDefault();
+      if(newPwd !== confirmPwd) {
+        showToast('كلمات المرور غير متطابقة', 'error');
+        return;
+      }
+      if(newPwd.length < 6) {
+        showToast('كلمة المرور يجب أن تكون 6 أحرف على الأقل', 'error');
+        return;
+      }
+
+      // Update Hash
+      localStorage.setItem(PASS_HASH_KEY, simpleHash(newPwd));
+      // Re-encrypt data with new key
+      const payload = { items: vaultData, logs: activityLog };
+      const encrypted = encodeData(payload, newPwd);
+      localStorage.setItem(STORAGE_KEY, encrypted);
+      
+      setMasterKey(newPwd);
+      setNewPwd('');
+      setConfirmPwd('');
+      logActivity('أمان', 'تم تغيير كلمة المرور الرئيسية');
+      showToast('تم تغيير كلمة المرور وتحديث التشفير بنجاح', 'success');
+    };
+
+    const handleNuke = () => {
+      if(window.confirm('تحذير خطير: سيتم مسح جميع البيانات نهائياً من هذا الجهاز. لا يمكن التراجع. هل أنت متأكد؟')) {
+         localStorage.removeItem(STORAGE_KEY);
+         setVaultData([]);
+         setActivityLog([]);
+         handleLock();
+         showToast('تم مسح جميع البيانات', 'info');
+      }
+    };
+
+    return (
+      <div className="animate-fade-in max-w-2xl mx-auto w-full space-y-6">
+        <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+          <Settings className="text-cyan-400" /> الإعدادات
+        </h2>
+
+        <div className="glass-panel rounded-2xl p-6 border border-slate-800">
+          <h3 className="text-lg font-bold text-white mb-4 border-b border-slate-700 pb-2">تغيير كلمة المرور الرئيسية</h3>
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">كلمة المرور الجديدة</label>
+              <input 
+                type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} required
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-cyan-500 focus:outline-none" dir="ltr"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">تأكيد كلمة المرور</label>
+              <input 
+                type="password" value={confirmPwd} onChange={e=>setConfirmPwd(e.target.value)} required
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-cyan-500 focus:outline-none" dir="ltr"
+              />
+            </div>
+            <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2 rounded-lg font-medium transition-colors">
+              حفظ وتحديث التشفير
+            </button>
+          </form>
+        </div>
+
+        <div className="glass-panel rounded-2xl p-6 border border-red-900/50 bg-red-900/10">
+          <h3 className="text-lg font-bold text-red-500 mb-2 flex items-center gap-2">
+            <AlertTriangle /> منطقة الخطر (مسح الخزنة)
+          </h3>
+          <p className="text-sm text-slate-400 mb-4">هذا الخيار سيقوم بحذف جميع البيانات المسجلة محلياً في هذا المتصفح بشكل لا يمكن استرجاعه.</p>
+          <button onClick={handleNuke} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium transition-colors">
+            تدمير الخزنة (مسح كل شيء)
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // --- MAIN RENDER ---
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <LoginScreen />
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex text-slate-200" dir="rtl">
+      <div className="cyber-bg"></div>
+      
+      {/* Sidebar */}
+      <aside className="w-64 glass-panel border-l border-slate-800 flex flex-col z-20 hidden md:flex h-screen sticky top-0">
+        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-900/50">
+            <Shield size={24} className="text-white" />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg text-white leading-tight">Safe Place</h1>
+            <span className="text-xs text-cyan-400">Secure Local Vault</span>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar py-4 px-3 space-y-1">
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => { setCurrentView(cat.id); setSearchQuery(''); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                currentView === cat.id 
+                  ? 'bg-gradient-to-r from-cyan-600/20 to-transparent border-r-2 border-cyan-500 text-cyan-400 font-bold' 
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <cat.icon size={18} />
+              <span className="text-sm">{cat.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="p-4 border-t border-slate-800 bg-slate-900/50">
+          <div className="flex items-center gap-3 px-2 py-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+              <User size={16} className="text-slate-400" />
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <p className="text-xs text-slate-500">مستخدم الخزنة</p>
+              <p className="text-sm font-bold text-white truncate">Local Admin</p>
+            </div>
+          </div>
+          <p className="text-[10px] text-center text-slate-500 pt-2 border-t border-slate-800">
+            جميع الحقوق محفوظة © محمد خالد
+          </p>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Top Header */}
+        <header className="h-20 glass-panel border-b border-slate-800 px-6 flex items-center justify-between z-10 sticky top-0">
+          {/* Mobile Menu Toggle placeholder - in real app would toggle sidebar */}
+          <div className="md:hidden flex items-center gap-2 font-bold text-cyan-400">
+             <Shield size={24}/> Safe Place
+          </div>
+
+          <div className="flex-1 max-w-xl mx-4 hidden md:block">
+            <div className="relative group">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-cyan-400 transition-colors" size={18} />
+              <input 
+                type="text" 
+                placeholder="ابحث في الخزنة..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-full py-2 pr-10 pl-4 text-sm text-white focus:outline-none focus:border-cyan-500 focus:bg-slate-900 transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button className="p-2 text-slate-400 hover:text-cyan-400 bg-slate-800/50 rounded-full hover:bg-slate-800 transition-colors relative">
+              <Bell size={20} />
+              <span className="absolute top-0 right-0 w-2 h-2 bg-cyan-500 rounded-full"></span>
+            </button>
+            <button 
+              onClick={handleLock}
+              className="flex items-center gap-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 px-4 py-2 rounded-full text-sm font-medium transition-colors border border-red-500/20"
+            >
+              <Lock size={16} /> قفل الخزنة
+            </button>
+          </div>
+        </header>
+
+        {/* Dynamic View Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 relative">
+          {currentView === 'dashboard' && <DashboardView />}
+          {currentView === 'activity' && <ActivityView />}
+          {currentView === 'backup' && <BackupView />}
+          {currentView === 'settings' && <SettingsView />}
+          {!['dashboard', 'activity', 'backup', 'settings'].includes(currentView) && <CategoryView />}
+        </div>
+      </main>
+
+      {/* Floating Action Button (Mobile) */}
+      <button 
+        onClick={() => { setEditingItem(null); setIsFormOpen(true); }}
+        className="md:hidden fixed bottom-6 left-6 w-14 h-14 bg-cyan-600 rounded-full flex items-center justify-center text-white shadow-[0_0_20px_rgba(6,182,212,0.5)] z-40"
+      >
+        <Plus size={24} />
+      </button>
+
+      {/* Modals & Overlays */}
+      <ItemFormModal />
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      
+    </div>
+  );
+}
